@@ -12,7 +12,7 @@ def create_and_fill_sheet(data):
 
     gc = gspread.authorize(creds)
 
-    sheet = gc.open_by_key("1fnYVY4gWpx3XE3hthcbXTDi-lByfYa3WX94Lbgr3ezA")
+    sheet = gc.open_by_key("1Ndd3mFpraoFgMZv72l8gNIo6O5BZtj5pZtE8VodtR9w")
 
     import datetime
     tab_name = "Course_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

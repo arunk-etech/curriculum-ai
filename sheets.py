@@ -12,12 +12,13 @@ def create_and_fill_sheet(data):
 
     gc = gspread.authorize(creds)
 
-    # Use spreadsheet ID instead of name
-    sheet = gc.open_by_key("PASTE_YOUR_SPREADSHEET_ID_HERE")
+    sheet = gc.open_by_key("1fnYVY4gWpx3XE3hthcbXTDi-lByfYa3WX94Lbgr3ezA")
 
-    # Create new worksheet tab per generation
+    import datetime
+    tab_name = "Course_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
     worksheet = sheet.add_worksheet(
-        title="Course_Output",
+        title=tab_name,
         rows="200",
         cols="20"
     )

@@ -15,7 +15,7 @@ def run_all_agents(input_data):
     system_prompt = """
     You are an expert curriculum architect.
 
-    Return curriculum in STRICT JSON format:
+    Generate curriculum in STRICT JSON format:
 
     {
         "units": [
@@ -33,7 +33,7 @@ def run_all_agents(input_data):
         ]
     }
 
-    Return JSON only. No explanation.
+    Return JSON only.
     """
 
     response = client.chat.completions.create(

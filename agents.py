@@ -13,33 +13,22 @@ def _get_client() -> OpenAI:
 
 
 def _extract_json_object(text: str) -> str:
-    """
-    Extract the first top-level JSON object from a messy string.
-    Handles cases like:
-    - ```json ... ```
-    - extra commentary before/after
-    """
     if not text:
         return ""
-
     t = text.strip()
 
-    # Strip markdown code fences
+    # Strip markdown fences
     if t.startswith("```"):
-        # Remove the first fence line (``` or ```json)
         lines = t.splitlines()
         if len(lines) >= 2 and lines[0].startswith("```"):
             t = "\n".join(lines[1:])
-        # Remove ending fence if present
         if t.strip().endswith("```"):
             t = t.strip()[:-3].strip()
 
-    # Find first '{' and last '}' to extract a JSON object
     start = t.find("{")
     end = t.rfind("}")
     if start == -1 or end == -1 or end <= start:
         return t
-
     return t[start:end + 1]
 
 
@@ -66,8 +55,7 @@ Schema (must match exactly; no extra keys):
           "content_knowledge": "string",
           "skills_21st": "string",
           "sdg_aligned": "string",
-          "materials_required": "string",
-          "english_script": "string"
+          "materials_required": "string"
         }
       ]
     }
@@ -77,7 +65,7 @@ Schema (must match exactly; no extra keys):
 Rules:
 - Output MUST be a single JSON object.
 - Fill missing fields with "N/A".
-- Keep english_script concise (5–8 lines).
+- Keep everything concise.
 """
 
     resp = client.chat.completions.create(
@@ -88,20 +76,16 @@ Rules:
             {"role": "user", "content": bad_text}
         ],
         temperature=0.0,
-        max_tokens=1400,
+        max_tokens=1200,
     )
 
     return _try_parse_json(resp.choices[0].message.content)
 
 
 def _repair_json(client: OpenAI, bad_text: str) -> dict:
-    """
-    Try repair twice (sometimes first repair still has minor issues).
-    """
     try:
         return _repair_json_once(client, bad_text)
     except Exception:
-        # Second repair attempt (even stricter)
         return _repair_json_once(client, bad_text)
 
 
@@ -126,8 +110,7 @@ Return STRICT JSON only matching this schema:
           "content_knowledge": "string",
           "skills_21st": "string",
           "sdg_aligned": "string",
-          "materials_required": "string",
-          "english_script": "string"
+          "materials_required": "string"
         }
       ]
     }
@@ -137,11 +120,11 @@ Return STRICT JSON only matching this schema:
 Hard constraints:
 - "units" MUST be an array.
 - Each unit has "unit_title" and "activities" (array).
-- Each activity has ALL 9 fields listed above.
+- Each activity has ALL 8 fields listed above.
 - No extra keys.
 - Generate EXACTLY input_data["units"] units.
 - Generate EXACTLY input_data["activities_per_unit"] activities per unit.
-- Keep english_script concise (5–8 lines).
+- Keep descriptions concise (1–2 sentences).
 """
 
     resp = client.chat.completions.create(
@@ -152,18 +135,17 @@ Hard constraints:
             {"role": "user", "content": json.dumps(input_data)}
         ],
         temperature=0.2,
-        max_tokens=1600,
+        max_tokens=1200,
     )
 
     raw = resp.choices[0].message.content
 
-    # Parse first
     try:
         parsed = _try_parse_json(raw)
     except Exception:
         parsed = _repair_json(client, raw)
 
-    # Defensive normalization so sheets.py never crashes
+    # Defensive normalization
     if not isinstance(parsed, dict):
         parsed = {"units": []}
     if "units" not in parsed or not isinstance(parsed["units"], list):
@@ -192,6 +174,5 @@ Hard constraints:
             a.setdefault("skills_21st", "N/A")
             a.setdefault("sdg_aligned", "N/A")
             a.setdefault("materials_required", "N/A")
-            a.setdefault("english_script", "N/A")
 
     return parsed

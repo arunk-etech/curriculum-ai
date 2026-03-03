@@ -31,7 +31,7 @@ def create_and_fill_sheet(data):
         # -----------------------------
         # 2️⃣ Open Master Spreadsheet
         # -----------------------------
-        spreadsheet_id = "PASTE_YOUR_SPREADSHEET_ID_HERE"
+        spreadsheet_id = "1Ndd3mFpraoFgMZv72l8gNIo6O5BZtj5pZtE8VodtR9w"
 
         if spreadsheet_id == "1Ndd3mFpraoFgMZv72l8gNIo6O5BZtj5pZtE8VodtR9w":
             raise ValueError("You must replace the spreadsheet_id")

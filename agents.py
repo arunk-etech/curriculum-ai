@@ -34,17 +34,12 @@ def _tool_call(client: OpenAI, system_prompt: str, user_payload: dict, tool_sche
 
 
 def run_all_agents(input_data: dict) -> dict:
-    """
-    Two-step generation:
-    1) Outline: unit titles + activity names
-    2) Details: for each unit, generate details for exactly activities_per_unit activities
-    """
     client = _client()
 
     units_target = int(input_data.get("units", 1))
     acts_target = int(input_data.get("activities_per_unit", 1))
 
-    # ---- STEP 1: OUTLINE (small output) ----
+    # ---- STEP 1: OUTLINE ----
     outline_tool = {
         "type": "function",
         "function": {
@@ -58,27 +53,24 @@ def run_all_agents(input_data: dict) -> dict:
                             "type": "object",
                             "properties": {
                                 "unit_title": {"type": "string"},
-                                "activities": {
-                                    "type": "array",
-                                    "items": {"type": "string"}
-                                }
+                                "activities": {"type": "array", "items": {"type": "string"}},
                             },
                             "required": ["unit_title", "activities"],
-                            "additionalProperties": False
-                        }
+                            "additionalProperties": False,
+                        },
                     }
                 },
                 "required": ["units"],
-                "additionalProperties": False
-            }
-        }
+                "additionalProperties": False,
+            },
+        },
     }
 
     outline_system = (
         "You are a curriculum architect.\n"
         f"Generate EXACTLY {units_target} units.\n"
         f"For each unit, generate EXACTLY {acts_target} activity names.\n"
-        "Return only via the tool call.\n"
+        "Return only via tool call.\n"
         "Keep titles short.\n"
     )
 
@@ -88,15 +80,22 @@ def run_all_agents(input_data: dict) -> dict:
         user_payload=input_data,
         tool_schema=outline_tool,
         tool_name="submit_outline",
-        max_tokens=800
+        max_tokens=900,
     )
 
-    # Defensive trimming
-    outline_units = outline.get("units", [])[:units_target]
-    for u in outline_units:
-        u["activities"] = (u.get("activities") or [])[:acts_target]
+    outline_units = (outline.get("units") or [])[:units_target]
 
-    # ---- STEP 2: DETAILS PER UNIT (small per-call output) ----
+    # Ensure every unit has exactly acts_target names
+    for ui, u in enumerate(outline_units, start=1):
+        names = list(u.get("activities") or [])
+        names = [str(x).strip() for x in names if str(x).strip()]
+        while len(names) < acts_target:
+            names.append(f"Activity {len(names)+1} (Unit {ui})")
+        u["activities"] = names[:acts_target]
+        if not str(u.get("unit_title", "")).strip():
+            u["unit_title"] = f"Unit {ui}"
+
+    # ---- STEP 2: DETAILS PER UNIT ----
     detail_tool = {
         "type": "function",
         "function": {
@@ -117,7 +116,7 @@ def run_all_agents(input_data: dict) -> dict:
                                 "content_knowledge": {"type": "string"},
                                 "skills_21st": {"type": "string"},
                                 "sdg_aligned": {"type": "string"},
-                                "materials_required": {"type": "string"}
+                                "materials_required": {"type": "string"},
                             },
                             "required": [
                                 "activity_name",
@@ -127,16 +126,16 @@ def run_all_agents(input_data: dict) -> dict:
                                 "content_knowledge",
                                 "skills_21st",
                                 "sdg_aligned",
-                                "materials_required"
+                                "materials_required",
                             ],
-                            "additionalProperties": False
-                        }
-                    }
+                            "additionalProperties": False,
+                        },
+                    },
                 },
                 "required": ["unit_title", "activities"],
-                "additionalProperties": False
-            }
-        }
+                "additionalProperties": False,
+            },
+        },
     }
 
     final_units = []
@@ -148,20 +147,16 @@ def run_all_agents(input_data: dict) -> dict:
         detail_system = (
             "You are a curriculum architect.\n"
             f"Create details for EXACTLY {acts_target} activities.\n"
-            "Description must be 4–5 lines (line breaks allowed).\n"
+            "Description must be 4–5 lines.\n"
             "Keep other fields concise (1–2 sentences).\n"
             "Use the provided 21st century skill focus/frameworks/rubric instructions if present.\n"
-            "Return only via the tool call.\n"
+            "Return only via tool call.\n"
         )
 
         payload = dict(input_data)
         payload["unit_title"] = unit_title
         payload["activity_names"] = activity_names
-
-        # Add a strong hint to use these names
-        payload["_instructions"] = {
-            "use_these_activity_names_in_order": activity_names
-        }
+        payload["_instructions"] = {"use_these_activity_names_in_order": activity_names}
 
         details = _tool_call(
             client=client,
@@ -169,17 +164,30 @@ def run_all_agents(input_data: dict) -> dict:
             user_payload=payload,
             tool_schema=detail_tool,
             tool_name="submit_unit_details",
-            max_tokens=1400
+            max_tokens=1600,
         )
 
-        # Force correct count & names (if model drifts)
-        acts = (details.get("activities") or [])[:acts_target]
+        acts = list(details.get("activities") or [])
+        # Force correct count: pad missing activities if model returned fewer
+        while len(acts) < acts_target:
+            missing_name = activity_names[len(acts)] if len(acts) < len(activity_names) else f"Activity {len(acts)+1}"
+            acts.append({
+                "activity_name": missing_name,
+                "description": "N/A",
+                "objective": "N/A",
+                "outcomes": "N/A",
+                "content_knowledge": "N/A",
+                "skills_21st": input_data.get("skill_focus_21st", "N/A") or "N/A",
+                "sdg_aligned": "N/A",
+                "materials_required": "N/A",
+            })
+
+        acts = acts[:acts_target]
+
+        # Force names in order
         for i in range(min(len(acts), len(activity_names))):
             acts[i]["activity_name"] = activity_names[i]
 
-        final_units.append({
-            "unit_title": unit_title,
-            "activities": acts
-        })
+        final_units.append({"unit_title": unit_title, "activities": acts})
 
     return {"units": final_units}

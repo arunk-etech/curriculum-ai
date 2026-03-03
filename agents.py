@@ -1,32 +1,41 @@
-from openai import OpenAI
-import os
-import json
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import List, Optional
+from sheets import create_and_fill_sheet
 
-def call_gpt(system_prompt, user_input):
-    api_key = os.getenv("OPENAI_API_KEY")
-
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY is not set in environment variables")
-
-    client = OpenAI(api_key=api_key)
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(user_input)}
-        ],
-        temperature=0.4
-    )
-
-    return response.choices[0].message.content
+app = FastAPI()
 
 
-def run_all_agents(input_data):
-    curriculum = call_gpt("You are Curriculum Designer. Return structured JSON.", input_data)
-    research = call_gpt("You are Research Analyst. Return structured JSON.", curriculum)
+class CourseInput(BaseModel):
+    course_name: str
+    grade: str
+    units: int
+    activities_per_unit: int
 
-    return {
-        "curriculum": curriculum,
-        "research": research
+    activity_types: Optional[List[str]] = None
+    skill_focus_21st: Optional[str] = None
+    frameworks: Optional[List[str]] = None
+    rubric_description: Optional[str] = None
+    special_instructions: Optional[str] = None
+
+
+@app.get("/")
+def home():
+    return {"status": "Curriculum AI running"}
+
+
+@app.post("/generate")
+def generate_course(data: CourseInput):
+
+    # 🚨 TEMPORARY: Bypass GPT to avoid timeout
+    dummy_data = {
+        "course_name": data.course_name,
+        "grade": data.grade,
+        "units": data.units,
+        "activities_per_unit": data.activities_per_unit,
+        "note": "GPT bypassed for testing sheet integration"
     }
+
+    sheet_url = create_and_fill_sheet(dummy_data)
+
+    return {"sheet_url": sheet_url}

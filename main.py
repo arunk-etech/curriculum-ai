@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List, Optional
+from agents import run_all_agents
 from sheets import create_and_fill_sheet
 
 app = FastAPI()
@@ -27,14 +28,10 @@ def home():
 @app.post("/generate")
 def generate_course(data: CourseInput):
 
-    dummy_data = {
-        "course_name": data.course_name,
-        "grade": data.grade,
-        "units": data.units,
-        "activities_per_unit": data.activities_per_unit,
-        "note": "GPT temporarily disabled for sheet testing"
-    }
+    # Step 1: Generate curriculum using GPT
+    results = run_all_agents(data.dict())
 
-    sheet_url = create_and_fill_sheet(dummy_data)
+    # Step 2: Write to Google Sheet
+    sheet_url = create_and_fill_sheet(results)
 
     return {"sheet_url": sheet_url}

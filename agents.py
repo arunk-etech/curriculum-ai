@@ -2,7 +2,6 @@ from openai import OpenAI
 import os
 import json
 
-
 MODEL = "gpt-4o-mini"
 
 
@@ -13,25 +12,24 @@ def _get_client() -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
-def _try_parse_json(text: str):
-    text = text.strip()
+def _try_parse_json(text: str) -> dict:
+    text = (text or "").strip()
 
-    # Remove common wrappers if model adds them
+    # Strip markdown fences if present
     if text.startswith("```"):
         text = text.strip("`")
-        # Sometimes it starts with ```json
-        text = text.replace("json", "", 1).strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
 
     return json.loads(text)
 
 
 def _repair_json(client: OpenAI, bad_text: str) -> dict:
     """
-    Second call: ask model to repair into valid JSON only.
-    Keep this short and deterministic.
+    Second call: repair invalid JSON into valid JSON matching schema exactly.
     """
     repair_prompt = """
-You will be given text that is intended to be JSON but is invalid.
+You will be given text intended to be JSON but it is invalid.
 Convert it into VALID JSON that matches this schema exactly:
 
 {
@@ -40,10 +38,15 @@ Convert it into VALID JSON that matches this schema exactly:
       "unit_title": "string",
       "activities": [
         {
-          "activity_title": "string",
+          "activity_name": "string",
+          "description": "string",
           "objective": "string",
-          "21st_century_skill": "string",
-          "assessment": "string"
+          "outcomes": "string",
+          "content_knowledge": "string",
+          "skills_21st": "string",
+          "sdg_aligned": "string",
+          "materials_required": "string",
+          "english_script": "string"
         }
       ]
     }
@@ -63,7 +66,7 @@ Rules:
             {"role": "user", "content": bad_text}
         ],
         temperature=0.0,
-        max_tokens=1200,
+        max_tokens=1600,
         response_format={"type": "json_object"},
     )
 
@@ -74,7 +77,7 @@ Rules:
 def run_all_agents(input_data: dict) -> dict:
     """
     Single-agent MVP:
-    Creates a structured curriculum JSON that sheets.py can write.
+    Generates curriculum JSON with the activity fields needed for the sheet columns.
     """
     client = _get_client()
 
@@ -89,10 +92,15 @@ Return STRICT JSON only matching this schema:
       "unit_title": "string",
       "activities": [
         {
-          "activity_title": "string",
+          "activity_name": "string",
+          "description": "string",
           "objective": "string",
-          "21st_century_skill": "string",
-          "assessment": "string"
+          "outcomes": "string",
+          "content_knowledge": "string",
+          "skills_21st": "string",
+          "sdg_aligned": "string",
+          "materials_required": "string",
+          "english_script": "string"
         }
       ]
     }
@@ -100,12 +108,13 @@ Return STRICT JSON only matching this schema:
 }
 
 Hard constraints:
-- units must be an ARRAY (list) of unit objects.
+- "units" MUST be an array of unit objects.
 - Each unit must have "unit_title" and "activities" (array).
-- Each activity must have all four fields.
+- Each activity must have ALL 9 fields listed above.
 - No extra keys.
-- Keep it concise: for each unit generate EXACTLY input_data["activities_per_unit"] activities.
 - Generate EXACTLY input_data["units"] units.
+- Generate EXACTLY input_data["activities_per_unit"] activities per unit.
+- Keep scripts concise (5–10 lines).
 """
 
     resp = client.chat.completions.create(
@@ -115,7 +124,7 @@ Hard constraints:
             {"role": "user", "content": json.dumps(input_data)}
         ],
         temperature=0.2,
-        max_tokens=1400,
+        max_tokens=1600,
         response_format={"type": "json_object"},
     )
 
@@ -125,29 +134,35 @@ Hard constraints:
     try:
         parsed = _try_parse_json(raw)
     except Exception:
-        # Repair if invalid
         parsed = _repair_json(client, raw)
 
-    # Final validation guard (prevents the exact error you saw)
+    # Final validation + defensive normalization
     if not isinstance(parsed, dict) or "units" not in parsed or not isinstance(parsed["units"], list):
-        # last resort: wrap into minimal valid structure
         parsed = {"units": []}
 
-    # Enforce unit/activity counts defensively
     units_target = int(input_data.get("units", 1))
     acts_target = int(input_data.get("activities_per_unit", 1))
 
     parsed["units"] = parsed["units"][:units_target]
     for u in parsed["units"]:
-        if "unit_title" not in u:
-            u["unit_title"] = "N/A"
+        if not isinstance(u, dict):
+            continue
+        u.setdefault("unit_title", "N/A")
         if "activities" not in u or not isinstance(u["activities"], list):
             u["activities"] = []
+
         u["activities"] = u["activities"][:acts_target]
         for a in u["activities"]:
-            a.setdefault("activity_title", "N/A")
+            if not isinstance(a, dict):
+                continue
+            a.setdefault("activity_name", "N/A")
+            a.setdefault("description", "N/A")
             a.setdefault("objective", "N/A")
-            a.setdefault("21st_century_skill", "N/A")
-            a.setdefault("assessment", "N/A")
+            a.setdefault("outcomes", "N/A")
+            a.setdefault("content_knowledge", "N/A")
+            a.setdefault("skills_21st", "N/A")
+            a.setdefault("sdg_aligned", "N/A")
+            a.setdefault("materials_required", "N/A")
+            a.setdefault("english_script", "N/A")
 
     return parsed

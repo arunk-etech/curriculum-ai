@@ -5,36 +5,90 @@ import json
 import datetime
 
 
-def _format_tab(sheet, worksheet):
+def _apply_wrap_only(sheet, worksheet):
+    """
+    Apply WRAP text to the entire worksheet (all cells).
+    """
+    sheet_id = worksheet.id
+    sheet.batch_update({
+        "requests": [
+            {
+                "repeatCell": {
+                    "range": {"sheetId": sheet_id},
+                    "cell": {
+                        "userEnteredFormat": {
+                            "wrapStrategy": "WRAP"
+                        }
+                    },
+                    "fields": "userEnteredFormat.wrapStrategy"
+                }
+            }
+        ]
+    })
+
+
+def _apply_curriculum_format(sheet, worksheet):
+    """
+    Curriculum-only formatting:
+    - Freeze row 1
+    - Freeze columns A–C
+    - Header row background light yellow + bold
+    - Columns A–C background light blue
+    """
     sheet_id = worksheet.id
     light_yellow = {"red": 1.0, "green": 1.0, "blue": 0.8}
     light_blue = {"red": 0.80, "green": 0.90, "blue": 1.0}
 
     sheet.batch_update({
         "requests": [
+            # Freeze header row and first 3 columns
             {
                 "updateSheetProperties": {
                     "properties": {
                         "sheetId": sheet_id,
-                        "gridProperties": {"frozenRowCount": 1, "frozenColumnCount": 3}
+                        "gridProperties": {
+                            "frozenRowCount": 1,
+                            "frozenColumnCount": 3
+                        }
                     },
                     "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount"
                 }
             },
+            # Header row background (row 1) + bold
             {
                 "repeatCell": {
-                    "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1},
-                    "cell": {"userEnteredFormat": {"backgroundColor": light_yellow, "textFormat": {"bold": True}}},
-                    "fields": "userEnteredFormat(backgroundColor,textFormat.bold)"
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 0,
+                        "endRowIndex": 1
+                    },
+                    "cell": {
+                        "userEnteredFormat": {
+                            "backgroundColor": light_yellow,
+                            "textFormat": {"bold": True},
+                            "wrapStrategy": "WRAP"
+                        }
+                    },
+                    "fields": "userEnteredFormat(backgroundColor,textFormat.bold,wrapStrategy)"
                 }
             },
+            # Columns A-C background (all rows)
             {
                 "repeatCell": {
-                    "range": {"sheetId": sheet_id, "startColumnIndex": 0, "endColumnIndex": 3},
-                    "cell": {"userEnteredFormat": {"backgroundColor": light_blue}},
-                    "fields": "userEnteredFormat.backgroundColor"
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": 3
+                    },
+                    "cell": {
+                        "userEnteredFormat": {
+                            "backgroundColor": light_blue,
+                            "wrapStrategy": "WRAP"
+                        }
+                    },
+                    "fields": "userEnteredFormat(backgroundColor,wrapStrategy)"
                 }
-            }
+            },
         ]
     })
 
@@ -61,6 +115,7 @@ def create_and_fill_sheet(data):
 
     # ---------------- Curriculum tab ----------------
     cur_ws = sheet.add_worksheet(title=f"{stamp}_Curriculum", rows="4000", cols="25")
+
     cur_headers = [
         "Unit No.", "Unit Title", "Activity No.",
         "Activity Name", "Description", "Objective", "Outcomes",
@@ -87,14 +142,21 @@ def create_and_fill_sheet(data):
             ])
 
     cur_ws.update("A1", cur_rows)
-    _format_tab(sheet, cur_ws)
+
+    # Wrap everywhere on Curriculum + apply special formatting ONLY here
+    _apply_wrap_only(sheet, cur_ws)
+    _apply_curriculum_format(sheet, cur_ws)
 
     # ---------------- Research tab (Agent 2) ----------------
-    res_ws = sheet.add_worksheet(title=f"{stamp}_Research", rows="2000", cols="20")
-    res_headers = ["Unit No.", "Unit Title", "Why this sequence", "Pedagogy", "Cognitive principle"]
-    res_rows = [res_headers]
-
+    res_ws = sheet.add_worksheet(title=f"{stamp}_Research", rows="2500", cols="25")
     research = data.get("research", {})
+
+    res_rows = [
+        ["Course Research Summary", research.get("summary", "")],
+        ["", ""],
+        ["Unit No.", "Unit Title", "Why this sequence", "Pedagogy", "Cognitive principle"],
+    ]
+
     for r in research.get("unit_rationales", []):
         res_rows.append([
             r.get("unit_no", ""),
@@ -104,20 +166,25 @@ def create_and_fill_sheet(data):
             r.get("cognitive_principle", ""),
         ])
 
-    res_rows.append(["", "", "Overall Summary", research.get("summary", ""), ""])
-    res_rows.append(["", "", "Citations", "", ""])
+    # Course-level citations (not per activity)
+    res_rows.append(["", ""])
+    res_rows.append(["Citations (course-level)", ""])
     for c in research.get("citations", []):
-        res_rows.append(["", "", c.get("title", ""), c.get("url", ""), c.get("note", "")])
+        res_rows.append([c.get("title", ""), c.get("url", "")])
 
     res_ws.update("A1", res_rows)
-    _format_tab(sheet, res_ws)
+    _apply_wrap_only(sheet, res_ws)
 
     # ---------------- Govt Alignment tab (Agent 3) ----------------
-    gov_ws = sheet.add_worksheet(title=f"{stamp}_Govt_Alignment", rows="2500", cols="20")
-    gov_headers = ["Unit No.", "Activity No.", "Alignment", "Standard Reference"]
-    gov_rows = [gov_headers]
-
+    gov_ws = sheet.add_worksheet(title=f"{stamp}_Govt_Alignment", rows="3000", cols="25")
     govt = data.get("govt_alignment", {})
+
+    gov_rows = [
+        ["Govt Alignment Notes (course-level)", ""],
+        ["", ""],
+        ["Unit No.", "Activity No.", "Alignment", "Standard Reference"],
+    ]
+
     for row in govt.get("rows", []):
         gov_rows.append([
             row.get("unit_no", ""),
@@ -126,19 +193,24 @@ def create_and_fill_sheet(data):
             row.get("standard_reference", ""),
         ])
 
-    gov_rows.append(["", "", "Citations", ""])
+    gov_rows.append(["", ""])
+    gov_rows.append(["Citations (course-level)", ""])
     for c in govt.get("citations", []):
-        gov_rows.append(["", "", c.get("title", ""), c.get("url", "")])
+        gov_rows.append([c.get("title", ""), c.get("url", "")])
 
     gov_ws.update("A1", gov_rows)
-    _format_tab(sheet, gov_ws)
+    _apply_wrap_only(sheet, gov_ws)
 
     # ---------------- International Alignment tab (Agent 4) ----------------
-    intl_ws = sheet.add_worksheet(title=f"{stamp}_International_Alignment", rows="2500", cols="25")
-    intl_headers = ["Unit No.", "Activity No.", "UNICEF Life Skill", "Skills Builder Skill", "SDG"]
-    intl_rows = [intl_headers]
-
+    intl_ws = sheet.add_worksheet(title=f"{stamp}_International_Alignment", rows="3000", cols="30")
     intl = data.get("international_alignment", {})
+
+    intl_rows = [
+        ["International Alignment Notes (course-level)", ""],
+        ["", ""],
+        ["Unit No.", "Activity No.", "UNICEF Life Skill", "Skills Builder Skill", "SDG"],
+    ]
+
     for row in intl.get("rows", []):
         intl_rows.append([
             row.get("unit_no", ""),
@@ -148,19 +220,24 @@ def create_and_fill_sheet(data):
             row.get("sdg", ""),
         ])
 
-    intl_rows.append(["", "", "Citations", "", ""])
+    intl_rows.append(["", ""])
+    intl_rows.append(["Citations (course-level)", ""])
     for c in intl.get("citations", []):
-        intl_rows.append(["", "", c.get("title", ""), c.get("url", ""), c.get("note", "")])
+        intl_rows.append([c.get("title", ""), c.get("url", "")])
 
     intl_ws.update("A1", intl_rows)
-    _format_tab(sheet, intl_ws)
+    _apply_wrap_only(sheet, intl_ws)
 
     # ---------------- Studies tab (Agent 5) ----------------
-    stu_ws = sheet.add_worksheet(title=f"{stamp}_Studies", rows="2500", cols="25")
-    stu_headers = ["Topic", "What it says", "Age/Grade", "How to use in class", "URL"]
-    stu_rows = [stu_headers]
-
+    stu_ws = sheet.add_worksheet(title=f"{stamp}_Studies", rows="3000", cols="30")
     studies = data.get("studies", {})
+
+    stu_rows = [
+        ["Studies Summary (course-level)", ""],
+        ["", ""],
+        ["Topic", "What it says", "Age/Grade", "How to use in class", "URL"],
+    ]
+
     for s in studies.get("studies", []):
         stu_rows.append([
             s.get("topic", ""),
@@ -170,11 +247,12 @@ def create_and_fill_sheet(data):
             s.get("url", ""),
         ])
 
-    stu_rows.append(["Citations", "", "", "", ""])
+    stu_rows.append(["", ""])
+    stu_rows.append(["Citations (course-level)", ""])
     for c in studies.get("citations", []):
-        stu_rows.append([c.get("title", ""), c.get("url", ""), c.get("note", ""), "", ""])
+        stu_rows.append([c.get("title", ""), c.get("url", "")])
 
     stu_ws.update("A1", stu_rows)
-    _format_tab(sheet, stu_ws)
+    _apply_wrap_only(sheet, stu_ws)
 
     return sheet.url

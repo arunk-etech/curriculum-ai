@@ -1,49 +1,45 @@
 from openai import OpenAI
 import os
-import json
 
 
 def run_all_agents(input_data):
 
-    api_key = os.getenv("OPENAI_API_KEY")
-
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY is not set in environment variables")
-
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     system_prompt = """
     You are an expert curriculum architect.
 
-    Design a structured curriculum based on:
-    - Course name
-    - Grade
-    - Number of units
-    - Activities per unit
-    - Activity types (if provided)
-    - 21st century skill focus
-    - Framework alignment (if provided)
-    - Rubric expectations (if provided)
+    Generate structured curriculum in this JSON format:
 
-    Return structured JSON only.
-    Do not return explanation text.
-    Keep output concise but structured.
+    {
+        "course_name": "",
+        "grade": "",
+        "units": [
+            {
+                "unit_title": "",
+                "activities": [
+                    {
+                        "activity_title": "",
+                        "objective": "",
+                        "21st_century_skill": "",
+                        "assessment": ""
+                    }
+                ]
+            }
+        ]
+    }
+
+    Return JSON only.
     """
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(input_data)}
+            {"role": "user", "content": str(input_data)}
         ],
-        temperature=0.3,
-        max_tokens=1200
+        temperature=0.4,
+        max_tokens=1500
     )
 
-    content = response.choices[0].message.content
-
-    try:
-        return json.loads(content)
-    except:
-        # If GPT returns non-perfect JSON, return raw content
-        return {"raw_output": content}
+    return eval(response.choices[0].message.content)

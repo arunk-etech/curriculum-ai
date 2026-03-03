@@ -1,6 +1,7 @@
 from openai import OpenAI
 import os
 import json
+import time
 
 MODEL = "gpt-4o-mini"
 
@@ -12,162 +13,105 @@ def _get_client() -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
-def _extract_json_object(text: str) -> str:
-    if not text:
-        return ""
-    t = text.strip()
-
-    # Remove markdown fences if any
-    if t.startswith("```"):
-        lines = t.splitlines()
-        if lines and lines[0].startswith("```"):
-            t = "\n".join(lines[1:])
-        if t.strip().endswith("```"):
-            t = t.strip()[:-3].strip()
-
-    # Extract first JSON object block
-    start = t.find("{")
-    end = t.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return t
-    return t[start:end + 1]
-
-
-def _try_parse_json(text: str) -> dict:
-    cleaned = _extract_json_object(text)
-    return json.loads(cleaned)
-
-
-def _repair_json_syntax_only(client: OpenAI, bad_json: str) -> dict:
-    prompt = (
-        "Fix this into VALID JSON ONLY.\n"
-        "Rules:\n"
-        "- Output ONLY a JSON object.\n"
-        "- No markdown, no commentary.\n"
-        "- Only fix JSON syntax (missing commas/quotes/braces).\n"
-        '- If a value is clearly missing, use "N/A".\n'
-    )
-
-    resp = client.chat.completions.create(
-        model=MODEL,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": bad_json},
-        ],
-        temperature=0.0,
-        max_tokens=1200,
-    )
-    return _try_parse_json(resp.choices[0].message.content)
-
-
-def _repair_json_to_schema(client: OpenAI, bad_text: str) -> dict:
-    schema_prompt = """
-Convert the following into VALID JSON ONLY (no markdown, no commentary).
-It MUST match this schema exactly (no extra keys):
-
-{
-  "units": [
-    {
-      "unit_title": "string",
-      "activities": [
-        {
-          "activity_name": "string",
-          "description": "string",
-          "objective": "string",
-          "outcomes": "string",
-          "content_knowledge": "string",
-          "skills_21st": "string",
-          "sdg_aligned": "string",
-          "materials_required": "string"
-        }
-      ]
+def _call_with_tools(client: OpenAI, input_data: dict) -> dict:
+    """
+    Uses function calling so the model returns structured JSON arguments.
+    This avoids brittle 'JSON in text' parsing.
+    """
+    tool_schema = {
+        "type": "function",
+        "function": {
+            "name": "submit_curriculum",
+            "description": "Return the curriculum in a strict structured format.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "units": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "unit_title": {"type": "string"},
+                                "activities": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "activity_name": {"type": "string"},
+                                            "description": {"type": "string"},
+                                            "objective": {"type": "string"},
+                                            "outcomes": {"type": "string"},
+                                            "content_knowledge": {"type": "string"},
+                                            "skills_21st": {"type": "string"},
+                                            "sdg_aligned": {"type": "string"},
+                                            "materials_required": {"type": "string"},
+                                        },
+                                        "required": [
+                                            "activity_name",
+                                            "description",
+                                            "objective",
+                                            "outcomes",
+                                            "content_knowledge",
+                                            "skills_21st",
+                                            "sdg_aligned",
+                                            "materials_required",
+                                        ],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                            },
+                            "required": ["unit_title", "activities"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                "required": ["units"],
+                "additionalProperties": False,
+            },
+        },
     }
-  ]
-}
 
-Rules:
-- Output ONLY JSON.
-- If missing anything, fill with "N/A".
-- Keep values concise (1–2 sentences max).
-"""
+    system_prompt = (
+        "You are a curriculum architect.\n"
+        "Generate EXACTLY input_data['units'] units.\n"
+        "For each unit, generate EXACTLY input_data['activities_per_unit'] activities.\n"
+        "Keep every field concise (1–2 sentences).\n"
+        "Return ONLY by calling the function submit_curriculum."
+    )
 
     resp = client.chat.completions.create(
         model=MODEL,
-        response_format={"type": "json_object"},
         messages=[
-            {"role": "system", "content": schema_prompt},
-            {"role": "user", "content": bad_text},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(input_data)},
         ],
-        temperature=0.0,
+        tools=[tool_schema],
+        tool_choice={"type": "function", "function": {"name": "submit_curriculum"}},
+        temperature=0.2,
         max_tokens=1200,
     )
 
-    repaired_text = resp.choices[0].message.content
+    msg = resp.choices[0].message
+    if not msg.tool_calls:
+        # Rare fallback: if tool call not returned, raise to retry
+        raise ValueError("No tool call returned by model")
 
-    try:
-        return _try_parse_json(repaired_text)
-    except Exception:
-        return _repair_json_syntax_only(client, repaired_text)
+    args_text = msg.tool_calls[0].function.arguments
+    return json.loads(args_text)
 
 
 def run_all_agents(input_data: dict) -> dict:
     client = _get_client()
 
-    system_prompt = """
-You are a curriculum architect.
-
-Return STRICT JSON ONLY matching this schema:
-
-{
-  "units": [
-    {
-      "unit_title": "string",
-      "activities": [
-        {
-          "activity_name": "string",
-          "description": "string",
-          "objective": "string",
-          "outcomes": "string",
-          "content_knowledge": "string",
-          "skills_21st": "string",
-          "sdg_aligned": "string",
-          "materials_required": "string"
-        }
-      ]
-    }
-  ]
-}
-
-Hard constraints:
-- "units" is an array.
-- Each unit has "unit_title" and "activities" array.
-- Each activity has ALL 8 fields listed above.
-- No extra keys.
-- Generate EXACTLY input_data["units"] units.
-- Generate EXACTLY input_data["activities_per_unit"] activities per unit.
-- Keep each field concise (1–2 sentences max).
-"""
-
-    resp = client.chat.completions.create(
-        model=MODEL,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(input_data)},
-        ],
-        temperature=0.2,
-        max_tokens=1200,
-    )
-
-    raw = resp.choices[0].message.content
-
+    # 1) Try once
     try:
-        parsed = _try_parse_json(raw)
+        parsed = _call_with_tools(client, input_data)
     except Exception:
-        parsed = _repair_json_to_schema(client, raw)
+        # 2) Retry once (short backoff)
+        time.sleep(0.5)
+        parsed = _call_with_tools(client, input_data)
 
-    # Defensive normalization
+    # Defensive normalization (so sheets never crashes)
     if not isinstance(parsed, dict):
         parsed = {"units": []}
     if "units" not in parsed or not isinstance(parsed["units"], list):
@@ -177,7 +121,6 @@ Hard constraints:
     acts_target = int(input_data.get("activities_per_unit", 1))
 
     parsed["units"] = parsed["units"][:units_target]
-
     for u in parsed["units"]:
         if not isinstance(u, dict):
             continue

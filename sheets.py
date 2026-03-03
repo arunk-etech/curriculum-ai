@@ -8,6 +8,7 @@ import datetime
 def create_and_fill_sheet(data):
 
     try:
+        # Load Google credentials
         creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
 
         if not creds_json:
@@ -25,11 +26,12 @@ def create_and_fill_sheet(data):
 
         gc = gspread.authorize(creds)
 
-        # ✅ Your real spreadsheet ID
+        # 🔥 REPLACE THIS
         spreadsheet_id = "1Ndd3mFpraoFgMZv72l8gNIo6O5BZtj5pZtE8VodtR9w"
 
         sheet = gc.open_by_key(spreadsheet_id)
 
+        # Create unique tab
         tab_name = "Course_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
         worksheet = sheet.add_worksheet(
@@ -38,12 +40,11 @@ def create_and_fill_sheet(data):
             cols="20"
         )
 
-        if not isinstance(data, dict):
-            raise ValueError("Invalid curriculum format")
-
+        # Validate structure
         if "units" not in data:
             raise ValueError("No 'units' key found in curriculum")
 
+        # Write headers
         headers = [
             "Unit Title",
             "Activity Title",
@@ -54,6 +55,7 @@ def create_and_fill_sheet(data):
 
         worksheet.append_row(headers)
 
+        # Write curriculum rows
         for unit in data["units"]:
 
             unit_title = unit.get("unit_title", "N/A")

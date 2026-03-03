@@ -1,0 +1,23 @@
+import gspread
+from google.oauth2.service_account import Credentials
+import os
+import json
+
+def create_and_fill_sheet(data):
+
+    creds_dict = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"))
+
+    creds = Credentials.from_service_account_info(
+        creds_dict,
+        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+
+    gc = gspread.authorize(creds)
+
+    sheet = gc.create("Curriculum AI Output")
+
+    worksheet = sheet.sheet1
+    worksheet.update("A1", [["Curriculum Data"]])
+    worksheet.update("A2", [[str(data)]])
+
+    return sheet.url

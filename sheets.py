@@ -8,9 +8,6 @@ import datetime
 def create_and_fill_sheet(data):
 
     try:
-        # -----------------------------
-        # 1️⃣ Load Google Credentials
-        # -----------------------------
         creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
 
         if not creds_json:
@@ -28,19 +25,11 @@ def create_and_fill_sheet(data):
 
         gc = gspread.authorize(creds)
 
-        # -----------------------------
-        # 2️⃣ Open Master Spreadsheet
-        # -----------------------------
+        # ✅ Your real spreadsheet ID
         spreadsheet_id = "1Ndd3mFpraoFgMZv72l8gNIo6O5BZtj5pZtE8VodtR9w"
-
-        if spreadsheet_id == "1Ndd3mFpraoFgMZv72l8gNIo6O5BZtj5pZtE8VodtR9w":
-            raise ValueError("You must replace the spreadsheet_id")
 
         sheet = gc.open_by_key(spreadsheet_id)
 
-        # -----------------------------
-        # 3️⃣ Create Unique Worksheet
-        # -----------------------------
         tab_name = "Course_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
         worksheet = sheet.add_worksheet(
@@ -49,18 +38,12 @@ def create_and_fill_sheet(data):
             cols="20"
         )
 
-        # -----------------------------
-        # 4️⃣ Validate GPT Output
-        # -----------------------------
         if not isinstance(data, dict):
             raise ValueError("Invalid curriculum format")
 
         if "units" not in data:
             raise ValueError("No 'units' key found in curriculum")
 
-        # -----------------------------
-        # 5️⃣ Write Header Row
-        # -----------------------------
         headers = [
             "Unit Title",
             "Activity Title",
@@ -71,13 +54,9 @@ def create_and_fill_sheet(data):
 
         worksheet.append_row(headers)
 
-        # -----------------------------
-        # 6️⃣ Write Curriculum Data
-        # -----------------------------
         for unit in data["units"]:
 
             unit_title = unit.get("unit_title", "N/A")
-
             activities = unit.get("activities", [])
 
             for activity in activities:

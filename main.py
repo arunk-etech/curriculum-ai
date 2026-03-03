@@ -27,11 +27,6 @@ def home():
 
 @app.post("/generate")
 def generate_course(data: CourseInput):
-
-    # Step 1: Generate curriculum using GPT
-    results = run_all_agents(data.dict())
-
-    # Step 2: Write to Google Sheet
+    results = run_all_agents(data.model_dump())
     sheet_url = create_and_fill_sheet(results)
-
     return {"sheet_url": sheet_url}

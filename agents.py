@@ -33,13 +33,13 @@ def _tool_call(client: OpenAI, system_prompt: str, user_payload: dict, tool_sche
     return json.loads(args_text)
 
 
-def run_all_agents(input_data: dict) -> dict:
-    client = _client()
+# -------------------- Agent 1: Curriculum (2-step) --------------------
 
+def _agent1_curriculum(client: OpenAI, input_data: dict) -> dict:
     units_target = int(input_data.get("units", 1))
     acts_target = int(input_data.get("activities_per_unit", 1))
 
-    # ---- STEP 1: OUTLINE ----
+    # Step 1: Outline
     outline_tool = {
         "type": "function",
         "function": {
@@ -95,7 +95,7 @@ def run_all_agents(input_data: dict) -> dict:
         if not str(u.get("unit_title", "")).strip():
             u["unit_title"] = f"Unit {ui}"
 
-    # ---- STEP 2: DETAILS PER UNIT ----
+    # Step 2: Details
     detail_tool = {
         "type": "function",
         "function": {
@@ -149,7 +149,7 @@ def run_all_agents(input_data: dict) -> dict:
             f"Create details for EXACTLY {acts_target} activities.\n"
             "Description must be 4–5 lines.\n"
             "Keep other fields concise (1–2 sentences).\n"
-            "Use the provided 21st century skill focus/frameworks/rubric instructions if present.\n"
+            "Use 21st century skill focus/frameworks/rubric instructions if present.\n"
             "Return only via tool call.\n"
         )
 
@@ -164,11 +164,10 @@ def run_all_agents(input_data: dict) -> dict:
             user_payload=payload,
             tool_schema=detail_tool,
             tool_name="submit_unit_details",
-            max_tokens=1600,
+            max_tokens=1800,
         )
 
         acts = list(details.get("activities") or [])
-        # Force correct count: pad missing activities if model returned fewer
         while len(acts) < acts_target:
             missing_name = activity_names[len(acts)] if len(acts) < len(activity_names) else f"Activity {len(acts)+1}"
             acts.append({
@@ -181,13 +180,236 @@ def run_all_agents(input_data: dict) -> dict:
                 "sdg_aligned": "N/A",
                 "materials_required": "N/A",
             })
-
         acts = acts[:acts_target]
-
-        # Force names in order
         for i in range(min(len(acts), len(activity_names))):
             acts[i]["activity_name"] = activity_names[i]
 
         final_units.append({"unit_title": unit_title, "activities": acts})
 
     return {"units": final_units}
+
+
+# -------------------- Agent 2–5 schemas --------------------
+
+def _citations_schema():
+    return {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "url": {"type": "string"},
+                "note": {"type": "string"},
+            },
+            "required": ["title", "url"],
+            "additionalProperties": False,
+        }
+    }
+
+
+def _agent2_research(client: OpenAI, payload: dict) -> dict:
+    tool = {
+        "type": "function",
+        "function": {
+            "name": "submit_research",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "unit_rationales": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "unit_no": {"type": "integer"},
+                                "unit_title": {"type": "string"},
+                                "why_this_sequence": {"type": "string"},
+                                "pedagogy": {"type": "string"},
+                                "cognitive_principle": {"type": "string"},
+                            },
+                            "required": ["unit_no", "unit_title", "why_this_sequence"],
+                            "additionalProperties": False
+                        }
+                    },
+                    "citations": _citations_schema(),
+                },
+                "required": ["summary", "unit_rationales", "citations"],
+                "additionalProperties": False,
+            }
+        }
+    }
+
+    system = (
+        "You are an education research analyst.\n"
+        "Explain the curriculum design rationale (sequencing, pedagogy, cognitive science).\n"
+        "Citations: include 3–6 references with URLs.\n"
+        "Keep answers concise.\n"
+        "Return only via tool call."
+    )
+
+    return _tool_call(client, system, payload, tool, "submit_research", max_tokens=1400)
+
+
+def _agent3_govt_alignment(client: OpenAI, payload: dict) -> dict:
+    tool = {
+        "type": "function",
+        "function": {
+            "name": "submit_govt_alignment",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rows": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "unit_no": {"type": "integer"},
+                                "activity_no": {"type": "integer"},
+                                "alignment": {"type": "string"},
+                                "standard_reference": {"type": "string"},
+                            },
+                            "required": ["unit_no", "activity_no", "alignment"],
+                            "additionalProperties": False
+                        }
+                    },
+                    "citations": _citations_schema(),
+                },
+                "required": ["rows", "citations"],
+                "additionalProperties": False
+            }
+        }
+    }
+
+    system = (
+        "You align the curriculum with NCERT/SCERT/NEP 2020 at a high level.\n"
+        "Provide mapping rows per activity (unit_no, activity_no).\n"
+        "Citations: include 3–6 official references with URLs.\n"
+        "Return only via tool call."
+    )
+
+    return _tool_call(client, system, payload, tool, "submit_govt_alignment", max_tokens=1600)
+
+
+def _agent4_international_alignment(client: OpenAI, payload: dict) -> dict:
+    tool = {
+        "type": "function",
+        "function": {
+            "name": "submit_international_alignment",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rows": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "unit_no": {"type": "integer"},
+                                "activity_no": {"type": "integer"},
+                                "unicef_life_skill": {"type": "string"},
+                                "skills_builder_skill": {"type": "string"},
+                                "sdg": {"type": "string"},
+                            },
+                            "required": ["unit_no", "activity_no"],
+                            "additionalProperties": False
+                        }
+                    },
+                    "citations": _citations_schema(),
+                },
+                "required": ["rows", "citations"],
+                "additionalProperties": False
+            }
+        }
+    }
+
+    system = (
+        "You align the curriculum with UNICEF Life Skills + Skills Builder + SDGs.\n"
+        "Provide mapping rows per activity (unit_no, activity_no).\n"
+        "Citations: include 3–6 framework references with URLs.\n"
+        "Return only via tool call."
+    )
+
+    return _tool_call(client, system, payload, tool, "submit_international_alignment", max_tokens=1600)
+
+
+def _agent5_studies(client: OpenAI, payload: dict) -> dict:
+    tool = {
+        "type": "function",
+        "function": {
+            "name": "submit_studies",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "studies": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "topic": {"type": "string"},
+                                "what_it_says": {"type": "string"},
+                                "age_grade": {"type": "string"},
+                                "how_to_use_in_class": {"type": "string"},
+                                "url": {"type": "string"},
+                            },
+                            "required": ["topic", "what_it_says", "url"],
+                            "additionalProperties": False
+                        }
+                    },
+                    "citations": _citations_schema(),
+                },
+                "required": ["studies", "citations"],
+                "additionalProperties": False
+            }
+        }
+    }
+
+    system = (
+        "You provide research studies relevant to this curriculum and skill focus.\n"
+        "Return 4–8 studies with links.\n"
+        "Citations: include same or extra references with URLs.\n"
+        "Return only via tool call."
+    )
+
+    return _tool_call(client, system, payload, tool, "submit_studies", max_tokens=1600)
+
+
+# -------------------- Orchestrator --------------------
+
+def run_all_agents(input_data: dict) -> dict:
+    client = _client()
+
+    curriculum = _agent1_curriculum(client, input_data)
+
+    # Make a compact payload for other agents to reduce token use
+    compact = {
+        "course_name": input_data.get("course_name"),
+        "grade": input_data.get("grade"),
+        "skill_focus_21st": input_data.get("skill_focus_21st"),
+        "frameworks": input_data.get("frameworks"),
+        "rubric_description": input_data.get("rubric_description"),
+        "special_instructions": input_data.get("special_instructions"),
+        # send only titles + activity names to alignment agents
+        "outline": [
+            {
+                "unit_no": i + 1,
+                "unit_title": u.get("unit_title", "N/A"),
+                "activities": [
+                    {"activity_no": j + 1, "activity_name": a.get("activity_name", "N/A")}
+                    for j, a in enumerate(u.get("activities", []))
+                ],
+            }
+            for i, u in enumerate(curriculum.get("units", []))
+        ]
+    }
+
+    research = _agent2_research(client, compact)
+    govt = _agent3_govt_alignment(client, compact)
+    intl = _agent4_international_alignment(client, compact)
+    studies = _agent5_studies(client, compact)
+
+    return {
+        "curriculum": curriculum,
+        "research": research,
+        "govt_alignment": govt,
+        "international_alignment": intl,
+        "studies": studies,
+    }

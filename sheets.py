@@ -8,10 +8,12 @@ def create_and_fill_sheet(data):
     creds_dict = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"))
 
     creds = Credentials.from_service_account_info(
-        creds_dict,
-        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    creds_dict,
+    scopes=[
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
     )
-
     gc = gspread.authorize(creds)
 
     sheet = gc.create("Curriculum AI Output")

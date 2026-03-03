@@ -1,24 +1,27 @@
-import gspread
-from google.oauth2.service_account import Credentials
-import os
-import json
-
 def create_and_fill_sheet(data):
 
     creds_dict = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"))
 
     creds = Credentials.from_service_account_info(
-    creds_dict,
-    scopes=[
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
+        creds_dict,
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
     )
+
     gc = gspread.authorize(creds)
 
-    sheet = gc.open_by_key("1fnYVY4gWpx3XE3hthcbXTDi-lByfYa3WX94Lbgr3ezA")
+    # Use spreadsheet ID instead of name
+    sheet = gc.open_by_key("PASTE_YOUR_SPREADSHEET_ID_HERE")
 
-    worksheet = sheet.sheet1
+    # Create new worksheet tab per generation
+    worksheet = sheet.add_worksheet(
+        title="Course_Output",
+        rows="200",
+        cols="20"
+    )
+
     worksheet.update("A1", [["Curriculum Data"]])
     worksheet.update("A2", [[str(data)]])
 

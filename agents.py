@@ -1,44 +1,49 @@
-import gspread
-from google.oauth2.service_account import Credentials
+from openai import OpenAI
 import os
 import json
-import datetime
 
 
-def create_and_fill_sheet(data):
+def run_all_agents(input_data):
+
+    api_key = os.getenv("OPENAI_API_KEY")
+
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY is not set in environment variables")
+
+    client = OpenAI(api_key=api_key)
+
+    system_prompt = """
+    You are an expert curriculum architect.
+
+    Design a structured curriculum based on:
+    - Course name
+    - Grade
+    - Number of units
+    - Activities per unit
+    - Activity types (if provided)
+    - 21st century skill focus
+    - Framework alignment (if provided)
+    - Rubric expectations (if provided)
+
+    Return structured JSON only.
+    Do not return explanation text.
+    Keep output concise but structured.
+    """
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(input_data)}
+        ],
+        temperature=0.3,
+        max_tokens=1200
+    )
+
+    content = response.choices[0].message.content
 
     try:
-        creds_dict = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"))
-
-        creds = Credentials.from_service_account_info(
-            creds_dict,
-            scopes=[
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive"
-            ]
-        )
-
-        gc = gspread.authorize(creds)
-
-        # 🔥 REPLACE THIS WITH YOUR REAL SPREADSHEET ID
-        spreadsheet_id = "1Ndd3mFpraoFgMZv72l8gNIo6O5BZtj5pZtE8VodtR9w"
-
-        sheet = gc.open_by_key(spreadsheet_id)
-
-        # Unique tab name to avoid duplicate errors
-        tab_name = "Course_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        worksheet = sheet.add_worksheet(
-            title=tab_name,
-            rows="200",
-            cols="20"
-        )
-
-        worksheet.update("A1", [["Curriculum Test Output"]])
-        worksheet.update("A2", [[json.dumps(data, indent=2)]])
-
-        return sheet.url
-
-    except Exception as e:
-        print("SHEET ERROR:", str(e))
-        raise e
+        return json.loads(content)
+    except:
+        # If GPT returns non-perfect JSON, return raw content
+        return {"raw_output": content}

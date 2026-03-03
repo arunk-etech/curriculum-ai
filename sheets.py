@@ -6,9 +6,7 @@ import datetime
 
 
 def create_and_fill_sheet(data):
-
     try:
-        # Load Google credentials
         creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
         if not creds_json:
             raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON not found")
@@ -25,19 +23,15 @@ def create_and_fill_sheet(data):
 
         gc = gspread.authorize(creds)
 
-        # ✅ Your master spreadsheet ID (already shared with service account)
         spreadsheet_id = "1Ndd3mFpraoFgMZv72l8gNIo6O5BZtj5pZtE8VodtR9w"
         sheet = gc.open_by_key(spreadsheet_id)
 
-        # Create unique tab
         tab_name = "Course_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         worksheet = sheet.add_worksheet(title=tab_name, rows="2000", cols="20")
 
-        # Validate structure
         if not isinstance(data, dict) or "units" not in data or not isinstance(data["units"], list):
             raise ValueError("Invalid curriculum format: expected {'units': [...]}")
 
-        # Headers exactly as requested
         headers = [
             "Activity Name",
             "Description",
@@ -47,32 +41,32 @@ def create_and_fill_sheet(data):
             "21st Century Skills",
             "SDG Aligned",
             "Material Required",
-            "English Script",
         ]
-        worksheet.append_row(headers)
 
-        # Write rows (one per activity)
+        rows = [headers]
+
         for unit in data["units"]:
             activities = unit.get("activities", [])
             if not isinstance(activities, list):
                 continue
 
-            for activity in activities:
-                if not isinstance(activity, dict):
+            for a in activities:
+                if not isinstance(a, dict):
                     continue
 
-                row = [
-                    activity.get("activity_name", "N/A"),
-                    activity.get("description", "N/A"),
-                    activity.get("objective", "N/A"),
-                    activity.get("outcomes", "N/A"),
-                    activity.get("content_knowledge", "N/A"),
-                    activity.get("skills_21st", "N/A"),
-                    activity.get("sdg_aligned", "N/A"),
-                    activity.get("materials_required", "N/A"),
-                    activity.get("english_script", "N/A"),
-                ]
-                worksheet.append_row(row)
+                rows.append([
+                    a.get("activity_name", "N/A"),
+                    a.get("description", "N/A"),
+                    a.get("objective", "N/A"),
+                    a.get("outcomes", "N/A"),
+                    a.get("content_knowledge", "N/A"),
+                    a.get("skills_21st", "N/A"),
+                    a.get("sdg_aligned", "N/A"),
+                    a.get("materials_required", "N/A"),
+                ])
+
+        # ✅ fast single call
+        worksheet.update("A1", rows)
 
         return sheet.url
 

@@ -14,10 +14,18 @@ def _get_client() -> OpenAI:
 
 
 def _call_with_tools(client: OpenAI, input_data: dict) -> dict:
-    """
-    Uses function calling so the model returns structured JSON arguments.
-    This avoids brittle 'JSON in text' parsing.
-    """
+    # Hard caps to prevent huge outputs (avoids truncation)
+    units_target = int(input_data.get("units", 1))
+    acts_target = int(input_data.get("activities_per_unit", 1))
+
+    # ✅ cap to keep Railway fast + prevent tool-args truncation
+    units_target = min(max(units_target, 1), 4)          # max 4 units
+    acts_target = min(max(acts_target, 1), 5)            # max 5 activities each
+
+    input_data = dict(input_data)
+    input_data["units"] = units_target
+    input_data["activities_per_unit"] = acts_target
+
     tool_schema = {
         "type": "function",
         "function": {
@@ -73,10 +81,15 @@ def _call_with_tools(client: OpenAI, input_data: dict) -> dict:
 
     system_prompt = (
         "You are a curriculum architect.\n"
-        "Generate EXACTLY input_data['units'] units.\n"
-        "For each unit, generate EXACTLY input_data['activities_per_unit'] activities.\n"
-        "Keep every field concise (1–2 sentences).\n"
-        "Return ONLY by calling the function submit_curriculum."
+        f"Generate EXACTLY {units_target} units.\n"
+        f"For each unit, generate EXACTLY {acts_target} activities.\n"
+        "VERY IMPORTANT OUTPUT LIMITS:\n"
+        "- unit_title: max 60 characters\n"
+        "- activity_name: max 80 characters\n"
+        "- description/objective/outcomes/content_knowledge/skills_21st/sdg_aligned/materials_required:\n"
+        "  each max 120 characters (1 short sentence).\n"
+        "- Do NOT use newline characters inside any field.\n"
+        "Return ONLY by calling submit_curriculum."
     )
 
     resp = client.chat.completions.create(
@@ -88,57 +101,38 @@ def _call_with_tools(client: OpenAI, input_data: dict) -> dict:
         tools=[tool_schema],
         tool_choice={"type": "function", "function": {"name": "submit_curriculum"}},
         temperature=0.2,
-        max_tokens=1200,
+        max_tokens=1800,  # give enough room so arguments aren't cut mid-string
     )
 
     msg = resp.choices[0].message
     if not msg.tool_calls:
-        # Rare fallback: if tool call not returned, raise to retry
         raise ValueError("No tool call returned by model")
 
     args_text = msg.tool_calls[0].function.arguments
+
+    # If truncated, args_text will be invalid JSON; raise to retry
     return json.loads(args_text)
 
 
 def run_all_agents(input_data: dict) -> dict:
     client = _get_client()
 
-    # 1) Try once
-    try:
-        parsed = _call_with_tools(client, input_data)
-    except Exception:
-        # 2) Retry once (short backoff)
-        time.sleep(0.5)
-        parsed = _call_with_tools(client, input_data)
+    # Try twice (truncation is intermittent)
+    for _ in range(2):
+        try:
+            parsed = _call_with_tools(client, input_data)
+            break
+        except Exception:
+            time.sleep(0.4)
+            parsed = None
 
-    # Defensive normalization (so sheets never crashes)
+    if not parsed:
+        raise ValueError("Model output was truncated twice; reduce units/activities.")
+
+    # Defensive normalization
     if not isinstance(parsed, dict):
         parsed = {"units": []}
     if "units" not in parsed or not isinstance(parsed["units"], list):
         parsed["units"] = []
-
-    units_target = int(input_data.get("units", 1))
-    acts_target = int(input_data.get("activities_per_unit", 1))
-
-    parsed["units"] = parsed["units"][:units_target]
-    for u in parsed["units"]:
-        if not isinstance(u, dict):
-            continue
-        u.setdefault("unit_title", "N/A")
-        if "activities" not in u or not isinstance(u["activities"], list):
-            u["activities"] = []
-        u["activities"] = u["activities"][:acts_target]
-
-        for a in u["activities"]:
-            if not isinstance(a, dict):
-                continue
-            a.setdefault("activity_name", "N/A")
-            a.setdefault("description", "N/A")
-            a.setdefault("objective", "N/A")
-            a.setdefault("outcomes", "N/A")
-            a.setdefault("content_knowledge", "N/A")
-            a.setdefault("skills_21st", "N/A")
-            a.setdefault("sdg_aligned", "N/A")
-            a.setdefault("materials_required", "N/A")
 
     return parsed

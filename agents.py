@@ -1,41 +1,44 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import List, Optional
-from sheets import create_and_fill_sheet
-
-app = FastAPI()
-
-
-class CourseInput(BaseModel):
-    course_name: str
-    grade: str
-    units: int
-    activities_per_unit: int
-
-    activity_types: Optional[List[str]] = None
-    skill_focus_21st: Optional[str] = None
-    frameworks: Optional[List[str]] = None
-    rubric_description: Optional[str] = None
-    special_instructions: Optional[str] = None
+import gspread
+from google.oauth2.service_account import Credentials
+import os
+import json
+import datetime
 
 
-@app.get("/")
-def home():
-    return {"status": "Curriculum AI running"}
+def create_and_fill_sheet(data):
 
+    try:
+        creds_dict = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"))
 
-@app.post("/generate")
-def generate_course(data: CourseInput):
+        creds = Credentials.from_service_account_info(
+            creds_dict,
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+        )
 
-    # 🚨 TEMPORARY: Bypass GPT to avoid timeout
-    dummy_data = {
-        "course_name": data.course_name,
-        "grade": data.grade,
-        "units": data.units,
-        "activities_per_unit": data.activities_per_unit,
-        "note": "GPT bypassed for testing sheet integration"
-    }
+        gc = gspread.authorize(creds)
 
-    sheet_url = create_and_fill_sheet(dummy_data)
+        # 🔥 REPLACE THIS WITH YOUR REAL SPREADSHEET ID
+        spreadsheet_id = "1Ndd3mFpraoFgMZv72l8gNIo6O5BZtj5pZtE8VodtR9w"
 
-    return {"sheet_url": sheet_url}
+        sheet = gc.open_by_key(spreadsheet_id)
+
+        # Unique tab name to avoid duplicate errors
+        tab_name = "Course_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        worksheet = sheet.add_worksheet(
+            title=tab_name,
+            rows="200",
+            cols="20"
+        )
+
+        worksheet.update("A1", [["Curriculum Test Output"]])
+        worksheet.update("A2", [[json.dumps(data, indent=2)]])
+
+        return sheet.url
+
+    except Exception as e:
+        print("SHEET ERROR:", str(e))
+        raise e

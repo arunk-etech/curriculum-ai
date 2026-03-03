@@ -7,53 +7,93 @@ import datetime
 
 def create_and_fill_sheet(data):
 
-    creds_dict = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"))
+    try:
+        # -----------------------------
+        # 1️⃣ Load Google Credentials
+        # -----------------------------
+        creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
 
-    creds = Credentials.from_service_account_info(
-        creds_dict,
-        scopes=[
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-    )
+        if not creds_json:
+            raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON not found")
 
-    gc = gspread.authorize(creds)
+        creds_dict = json.loads(creds_json)
 
-    spreadsheet_id = "1Ndd3mFpraoFgMZv72l8gNIo6O5BZtj5pZtE8VodtR9w"
-    sheet = gc.open_by_key(spreadsheet_id)
-
-    tab_name = "Course_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    worksheet = sheet.add_worksheet(
-        title=tab_name,
-        rows="1000",
-        cols="20"
-    )
-
-    # Header row
-    headers = [
-        "Unit",
-        "Activity",
-        "Objective",
-        "21st Century Skill",
-        "Assessment"
-    ]
-
-    worksheet.append_row(headers)
-
-    # Fill curriculum
-    for unit in data["units"]:
-        unit_title = unit["unit_title"]
-
-        for activity in unit["activities"]:
-            row = [
-                unit_title,
-                activity["activity_title"],
-                activity["objective"],
-                activity["21st_century_skill"],
-                activity["assessment"]
+        creds = Credentials.from_service_account_info(
+            creds_dict,
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
             ]
+        )
 
-            worksheet.append_row(row)
+        gc = gspread.authorize(creds)
 
-    return sheet.url
+        # -----------------------------
+        # 2️⃣ Open Master Spreadsheet
+        # -----------------------------
+        spreadsheet_id = "PASTE_YOUR_SPREADSHEET_ID_HERE"
+
+        if spreadsheet_id == "1Ndd3mFpraoFgMZv72l8gNIo6O5BZtj5pZtE8VodtR9w":
+            raise ValueError("You must replace the spreadsheet_id")
+
+        sheet = gc.open_by_key(spreadsheet_id)
+
+        # -----------------------------
+        # 3️⃣ Create Unique Worksheet
+        # -----------------------------
+        tab_name = "Course_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        worksheet = sheet.add_worksheet(
+            title=tab_name,
+            rows="1000",
+            cols="20"
+        )
+
+        # -----------------------------
+        # 4️⃣ Validate GPT Output
+        # -----------------------------
+        if not isinstance(data, dict):
+            raise ValueError("Invalid curriculum format")
+
+        if "units" not in data:
+            raise ValueError("No 'units' key found in curriculum")
+
+        # -----------------------------
+        # 5️⃣ Write Header Row
+        # -----------------------------
+        headers = [
+            "Unit Title",
+            "Activity Title",
+            "Objective",
+            "21st Century Skill",
+            "Assessment"
+        ]
+
+        worksheet.append_row(headers)
+
+        # -----------------------------
+        # 6️⃣ Write Curriculum Data
+        # -----------------------------
+        for unit in data["units"]:
+
+            unit_title = unit.get("unit_title", "N/A")
+
+            activities = unit.get("activities", [])
+
+            for activity in activities:
+
+                row = [
+                    unit_title,
+                    activity.get("activity_title", "N/A"),
+                    activity.get("objective", "N/A"),
+                    activity.get("21st_century_skill", "N/A"),
+                    activity.get("assessment", "N/A")
+                ]
+
+                worksheet.append_row(row)
+
+        return sheet.url
+
+    except Exception as e:
+        print("SHEET ERROR:", str(e))
+        raise e

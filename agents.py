@@ -2,6 +2,8 @@ from openai import OpenAI
 import os
 import json
 
+from search_layer import build_course_search_context  # ✅ NEW
+
 MODEL = "gpt-4o-mini"
 
 
@@ -12,12 +14,19 @@ def _client() -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
-def _tool_call(client: OpenAI, system_prompt: str, user_payload: dict, tool_schema: dict, tool_name: str, max_tokens: int):
+def _tool_call(
+    client: OpenAI,
+    system_prompt: str,
+    user_payload: dict,
+    tool_schema: dict,
+    tool_name: str,
+    max_tokens: int,
+):
     resp = client.chat.completions.create(
         model=MODEL,
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(user_payload)}
+            {"role": "user", "content": json.dumps(user_payload)},
         ],
         tools=[tool_schema],
         tool_choice={"type": "function", "function": {"name": tool_name}},
@@ -39,7 +48,6 @@ def _agent1_curriculum(client: OpenAI, input_data: dict) -> dict:
     units_target = int(input_data.get("units", 1))
     acts_target = int(input_data.get("activities_per_unit", 1))
 
-    # Step 1: Outline
     outline_tool = {
         "type": "function",
         "function": {
@@ -90,12 +98,11 @@ def _agent1_curriculum(client: OpenAI, input_data: dict) -> dict:
         names = list(u.get("activities") or [])
         names = [str(x).strip() for x in names if str(x).strip()]
         while len(names) < acts_target:
-            names.append(f"Activity {len(names)+1} (Unit {ui})")
+            names.append(f"Activity {len(names) + 1} (Unit {ui})")
         u["activities"] = names[:acts_target]
         if not str(u.get("unit_title", "")).strip():
             u["unit_title"] = f"Unit {ui}"
 
-    # Step 2: Details
     detail_tool = {
         "type": "function",
         "function": {
@@ -169,7 +176,7 @@ def _agent1_curriculum(client: OpenAI, input_data: dict) -> dict:
 
         acts = list(details.get("activities") or [])
         while len(acts) < acts_target:
-            missing_name = activity_names[len(acts)] if len(acts) < len(activity_names) else f"Activity {len(acts)+1}"
+            missing_name = activity_names[len(acts)] if len(acts) < len(activity_names) else f"Activity {len(acts) + 1}"
             acts.append({
                 "activity_name": missing_name,
                 "description": "N/A",
@@ -228,26 +235,29 @@ def _agent2_research(client: OpenAI, payload: dict) -> dict:
                                 "cognitive_principle": {"type": "string"},
                             },
                             "required": ["unit_no", "unit_title", "why_this_sequence"],
-                            "additionalProperties": False
-                        }
+                            "additionalProperties": False,
+                        },
                     },
                     "citations": _citations_schema(),
                 },
                 "required": ["summary", "unit_rationales", "citations"],
                 "additionalProperties": False,
-            }
-        }
+            },
+        },
     }
 
     system = (
         "You are an education research analyst.\n"
         "Explain the curriculum design rationale (sequencing, pedagogy, cognitive science).\n"
-        "Citations: include 3–6 references with URLs.\n"
+        "CITATION RULES:\n"
+        "- You MUST use ONLY URLs from payload.search_context.research_sources.\n"
+        "- Do NOT invent new URLs.\n"
+        "- Provide 3–6 citations.\n"
         "Keep answers concise.\n"
         "Return only via tool call."
     )
 
-    return _tool_call(client, system, payload, tool, "submit_research", max_tokens=1400)
+    return _tool_call(client, system, payload, tool, "submit_research", max_tokens=1600)
 
 
 def _agent3_govt_alignment(client: OpenAI, payload: dict) -> dict:
@@ -269,25 +279,28 @@ def _agent3_govt_alignment(client: OpenAI, payload: dict) -> dict:
                                 "standard_reference": {"type": "string"},
                             },
                             "required": ["unit_no", "activity_no", "alignment"],
-                            "additionalProperties": False
-                        }
+                            "additionalProperties": False,
+                        },
                     },
                     "citations": _citations_schema(),
                 },
                 "required": ["rows", "citations"],
-                "additionalProperties": False
-            }
-        }
+                "additionalProperties": False,
+            },
+        },
     }
 
     system = (
         "You align the curriculum with NCERT/SCERT/NEP 2020 at a high level.\n"
         "Provide mapping rows per activity (unit_no, activity_no).\n"
-        "Citations: include 3–6 official references with URLs.\n"
+        "CITATION RULES:\n"
+        "- You MUST use ONLY URLs from payload.search_context.govt_sources.\n"
+        "- Do NOT invent new URLs.\n"
+        "- Provide 3–6 citations.\n"
         "Return only via tool call."
     )
 
-    return _tool_call(client, system, payload, tool, "submit_govt_alignment", max_tokens=1600)
+    return _tool_call(client, system, payload, tool, "submit_govt_alignment", max_tokens=1800)
 
 
 def _agent4_international_alignment(client: OpenAI, payload: dict) -> dict:
@@ -310,25 +323,28 @@ def _agent4_international_alignment(client: OpenAI, payload: dict) -> dict:
                                 "sdg": {"type": "string"},
                             },
                             "required": ["unit_no", "activity_no"],
-                            "additionalProperties": False
-                        }
+                            "additionalProperties": False,
+                        },
                     },
                     "citations": _citations_schema(),
                 },
                 "required": ["rows", "citations"],
-                "additionalProperties": False
-            }
-        }
+                "additionalProperties": False,
+            },
+        },
     }
 
     system = (
         "You align the curriculum with UNICEF Life Skills + Skills Builder + SDGs.\n"
         "Provide mapping rows per activity (unit_no, activity_no).\n"
-        "Citations: include 3–6 framework references with URLs.\n"
+        "CITATION RULES:\n"
+        "- You MUST use ONLY URLs from payload.search_context.international_sources.\n"
+        "- Do NOT invent new URLs.\n"
+        "- Provide 3–6 citations.\n"
         "Return only via tool call."
     )
 
-    return _tool_call(client, system, payload, tool, "submit_international_alignment", max_tokens=1600)
+    return _tool_call(client, system, payload, tool, "submit_international_alignment", max_tokens=1800)
 
 
 def _agent5_studies(client: OpenAI, payload: dict) -> dict:
@@ -351,25 +367,29 @@ def _agent5_studies(client: OpenAI, payload: dict) -> dict:
                                 "url": {"type": "string"},
                             },
                             "required": ["topic", "what_it_says", "url"],
-                            "additionalProperties": False
-                        }
+                            "additionalProperties": False,
+                        },
                     },
                     "citations": _citations_schema(),
                 },
                 "required": ["studies", "citations"],
-                "additionalProperties": False
-            }
-        }
+                "additionalProperties": False,
+            },
+        },
     }
 
     system = (
         "You provide research studies relevant to this curriculum and skill focus.\n"
         "Return 4–8 studies with links.\n"
-        "Citations: include same or extra references with URLs.\n"
+        "CITATION RULES:\n"
+        "- You MUST use ONLY URLs from payload.search_context.studies_sources.\n"
+        "- Do NOT invent new URLs.\n"
+        "- Studies[].url MUST be one of the allowed URLs.\n"
+        "- Provide 4–8 citations.\n"
         "Return only via tool call."
     )
 
-    return _tool_call(client, system, payload, tool, "submit_studies", max_tokens=1600)
+    return _tool_call(client, system, payload, tool, "submit_studies", max_tokens=2000)
 
 
 # -------------------- Orchestrator --------------------
@@ -379,7 +399,6 @@ def run_all_agents(input_data: dict) -> dict:
 
     curriculum = _agent1_curriculum(client, input_data)
 
-    # Make a compact payload for other agents to reduce token use
     compact = {
         "course_name": input_data.get("course_name"),
         "grade": input_data.get("grade"),
@@ -387,7 +406,6 @@ def run_all_agents(input_data: dict) -> dict:
         "frameworks": input_data.get("frameworks"),
         "rubric_description": input_data.get("rubric_description"),
         "special_instructions": input_data.get("special_instructions"),
-        # send only titles + activity names to alignment agents
         "outline": [
             {
                 "unit_no": i + 1,
@@ -398,8 +416,15 @@ def run_all_agents(input_data: dict) -> dict:
                 ],
             }
             for i, u in enumerate(curriculum.get("units", []))
-        ]
+        ],
     }
+
+    # ✅ NEW: course-level search context (grounding)
+    compact["search_context"] = build_course_search_context(
+        course_name=str(compact.get("course_name") or ""),
+        grade=str(compact.get("grade") or ""),
+        skill_focus_21st=str(compact.get("skill_focus_21st") or ""),
+    )
 
     research = _agent2_research(client, compact)
     govt = _agent3_govt_alignment(client, compact)

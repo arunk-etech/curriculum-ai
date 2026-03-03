@@ -27,12 +27,15 @@ def create_and_fill_sheet(data):
         sheet = gc.open_by_key(spreadsheet_id)
 
         tab_name = "Course_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        worksheet = sheet.add_worksheet(title=tab_name, rows="2000", cols="20")
+        worksheet = sheet.add_worksheet(title=tab_name, rows="3000", cols="25")
 
         if not isinstance(data, dict) or "units" not in data or not isinstance(data["units"], list):
             raise ValueError("Invalid curriculum format: expected {'units': [...]}")
 
+        # ✅ Headers (Unit + Activity No added before Activity Name)
         headers = [
+            "Unit",
+            "Activity No.",
             "Activity Name",
             "Description",
             "Objective",
@@ -45,17 +48,22 @@ def create_and_fill_sheet(data):
 
         rows = [headers]
 
-        for unit in data["units"]:
+        # Write rows (one per activity)
+        for unit_index, unit in enumerate(data["units"], start=1):
+            unit_title = unit.get("unit_title", f"Unit {unit_index}")
             activities = unit.get("activities", [])
+
             if not isinstance(activities, list):
                 continue
 
-            for a in activities:
+            for activity_index, a in enumerate(activities, start=1):
                 if not isinstance(a, dict):
                     continue
 
                 rows.append([
-                    a.get("activity_name", "N/A"),
+                    unit_title,                         # Unit
+                    activity_index,                     # Activity No.
+                    a.get("activity_name", "N/A"),      # Activity Name
                     a.get("description", "N/A"),
                     a.get("objective", "N/A"),
                     a.get("outcomes", "N/A"),
@@ -65,7 +73,7 @@ def create_and_fill_sheet(data):
                     a.get("materials_required", "N/A"),
                 ])
 
-        # ✅ fast single call
+        # ✅ Fast single call
         worksheet.update("A1", rows)
 
         return sheet.url

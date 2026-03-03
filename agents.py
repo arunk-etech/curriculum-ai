@@ -12,26 +12,47 @@ def _get_client() -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
+def _extract_json_object(text: str) -> str:
+    """
+    Extract the first top-level JSON object from a messy string.
+    Handles cases like:
+    - ```json ... ```
+    - extra commentary before/after
+    """
+    if not text:
+        return ""
+
+    t = text.strip()
+
+    # Strip markdown code fences
+    if t.startswith("```"):
+        # Remove the first fence line (``` or ```json)
+        lines = t.splitlines()
+        if len(lines) >= 2 and lines[0].startswith("```"):
+            t = "\n".join(lines[1:])
+        # Remove ending fence if present
+        if t.strip().endswith("```"):
+            t = t.strip()[:-3].strip()
+
+    # Find first '{' and last '}' to extract a JSON object
+    start = t.find("{")
+    end = t.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return t
+
+    return t[start:end + 1]
+
+
 def _try_parse_json(text: str) -> dict:
-    text = (text or "").strip()
-
-    # Strip markdown fences if present
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.lower().startswith("json"):
-            text = text[4:].strip()
-
-    return json.loads(text)
+    cleaned = _extract_json_object(text)
+    return json.loads(cleaned)
 
 
-def _repair_json(client: OpenAI, bad_text: str) -> dict:
-    """
-    Second call: repair invalid JSON into valid JSON matching schema exactly.
-    """
+def _repair_json_once(client: OpenAI, bad_text: str) -> dict:
     repair_prompt = """
-You will be given text intended to be JSON but it is invalid.
-Convert it into VALID JSON that matches this schema exactly:
+Fix the following into VALID JSON ONLY (no markdown, no commentary).
 
+Schema (must match exactly; no extra keys):
 {
   "units": [
     {
@@ -54,31 +75,37 @@ Convert it into VALID JSON that matches this schema exactly:
 }
 
 Rules:
-- Output JSON only (no markdown, no commentary).
-- Do not add extra keys.
-- If something is missing, fill with "N/A".
+- Output MUST be a single JSON object.
+- Fill missing fields with "N/A".
+- Keep english_script concise (5–8 lines).
 """
 
     resp = client.chat.completions.create(
         model=MODEL,
+        response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": repair_prompt},
             {"role": "user", "content": bad_text}
         ],
         temperature=0.0,
-        max_tokens=1600,
-        response_format={"type": "json_object"},
+        max_tokens=1400,
     )
 
-    repaired = resp.choices[0].message.content
-    return _try_parse_json(repaired)
+    return _try_parse_json(resp.choices[0].message.content)
+
+
+def _repair_json(client: OpenAI, bad_text: str) -> dict:
+    """
+    Try repair twice (sometimes first repair still has minor issues).
+    """
+    try:
+        return _repair_json_once(client, bad_text)
+    except Exception:
+        # Second repair attempt (even stricter)
+        return _repair_json_once(client, bad_text)
 
 
 def run_all_agents(input_data: dict) -> dict:
-    """
-    Single-agent MVP:
-    Generates curriculum JSON with the activity fields needed for the sheet columns.
-    """
     client = _get_client()
 
     system_prompt = """
@@ -108,37 +135,39 @@ Return STRICT JSON only matching this schema:
 }
 
 Hard constraints:
-- "units" MUST be an array of unit objects.
-- Each unit must have "unit_title" and "activities" (array).
-- Each activity must have ALL 9 fields listed above.
+- "units" MUST be an array.
+- Each unit has "unit_title" and "activities" (array).
+- Each activity has ALL 9 fields listed above.
 - No extra keys.
 - Generate EXACTLY input_data["units"] units.
 - Generate EXACTLY input_data["activities_per_unit"] activities per unit.
-- Keep scripts concise (5–10 lines).
+- Keep english_script concise (5–8 lines).
 """
 
     resp = client.chat.completions.create(
         model=MODEL,
+        response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": json.dumps(input_data)}
         ],
         temperature=0.2,
         max_tokens=1600,
-        response_format={"type": "json_object"},
     )
 
     raw = resp.choices[0].message.content
 
-    # 1st parse attempt
+    # Parse first
     try:
         parsed = _try_parse_json(raw)
     except Exception:
         parsed = _repair_json(client, raw)
 
-    # Final validation + defensive normalization
-    if not isinstance(parsed, dict) or "units" not in parsed or not isinstance(parsed["units"], list):
+    # Defensive normalization so sheets.py never crashes
+    if not isinstance(parsed, dict):
         parsed = {"units": []}
+    if "units" not in parsed or not isinstance(parsed["units"], list):
+        parsed["units"] = []
 
     units_target = int(input_data.get("units", 1))
     acts_target = int(input_data.get("activities_per_unit", 1))
@@ -150,8 +179,8 @@ Hard constraints:
         u.setdefault("unit_title", "N/A")
         if "activities" not in u or not isinstance(u["activities"], list):
             u["activities"] = []
-
         u["activities"] = u["activities"][:acts_target]
+
         for a in u["activities"]:
             if not isinstance(a, dict):
                 continue

@@ -32,9 +32,9 @@ def create_and_fill_sheet(data):
         if not isinstance(data, dict) or "units" not in data or not isinstance(data["units"], list):
             raise ValueError("Invalid curriculum format: expected {'units': [...]}")
 
-        # ✅ Headers (Unit + Activity No added before Activity Name)
         headers = [
-            "Unit",
+            "Unit No.",
+            "Unit Title",
             "Activity No.",
             "Activity Name",
             "Description",
@@ -48,22 +48,21 @@ def create_and_fill_sheet(data):
 
         rows = [headers]
 
-        # Write rows (one per activity)
-        for unit_index, unit in enumerate(data["units"], start=1):
-            unit_title = unit.get("unit_title", f"Unit {unit_index}")
+        for unit_no, unit in enumerate(data["units"], start=1):
+            unit_title = unit.get("unit_title", f"Unit {unit_no}")
             activities = unit.get("activities", [])
-
             if not isinstance(activities, list):
                 continue
 
-            for activity_index, a in enumerate(activities, start=1):
+            for activity_no, a in enumerate(activities, start=1):
                 if not isinstance(a, dict):
                     continue
 
                 rows.append([
-                    unit_title,                         # Unit
-                    activity_index,                     # Activity No.
-                    a.get("activity_name", "N/A"),      # Activity Name
+                    unit_no,
+                    unit_title,
+                    activity_no,
+                    a.get("activity_name", "N/A"),
                     a.get("description", "N/A"),
                     a.get("objective", "N/A"),
                     a.get("outcomes", "N/A"),
@@ -73,8 +72,66 @@ def create_and_fill_sheet(data):
                     a.get("materials_required", "N/A"),
                 ])
 
-        # ✅ Fast single call
+        # Fast write
         worksheet.update("A1", rows)
+
+        # ---------- Formatting (Freeze + Colors) ----------
+        sheet_id = worksheet.id
+
+        # Colors use 0..1 floats
+        light_yellow = {"red": 1.0, "green": 1.0, "blue": 0.8}
+        light_blue = {"red": 0.80, "green": 0.90, "blue": 1.0}
+
+        sheet.batch_update({
+            "requests": [
+                # Freeze row 1 and first 3 columns (A-C)
+                {
+                    "updateSheetProperties": {
+                        "properties": {
+                            "sheetId": sheet_id,
+                            "gridProperties": {
+                                "frozenRowCount": 1,
+                                "frozenColumnCount": 3
+                            }
+                        },
+                        "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount"
+                    }
+                },
+                # Header row background = light yellow (row 1)
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 0,
+                            "endRowIndex": 1
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "backgroundColor": light_yellow,
+                                "textFormat": {"bold": True}
+                            }
+                        },
+                        "fields": "userEnteredFormat(backgroundColor,textFormat.bold)"
+                    }
+                },
+                # Columns A-C background = light blue (all rows)
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startColumnIndex": 0,
+                            "endColumnIndex": 3
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "backgroundColor": light_blue
+                            }
+                        },
+                        "fields": "userEnteredFormat.backgroundColor"
+                    }
+                },
+            ]
+        })
 
         return sheet.url
 

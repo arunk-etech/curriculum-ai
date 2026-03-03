@@ -16,7 +16,7 @@ def create_and_fill_sheet(data):
     )
     gc = gspread.authorize(creds)
 
-    sheet = gc.create("Curriculum AI Output")
+    sheet = gc.open_by_key("1fnYVY4gWpx3XE3hthcbXTDi-lByfYa3WX94Lbgr3ezA")
 
     worksheet = sheet.sheet1
     worksheet.update("A1", [["Curriculum Data"]])

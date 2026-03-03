@@ -4,3 +4,4 @@ openai
 gspread
 google-auth
 openai>=1.30.0
+requests
